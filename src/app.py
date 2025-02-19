@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-
+import os
 from processor_regex import regex_classify
 from processor_bert import bert_classify
 from processor_llm  import llm_classify
@@ -39,8 +39,7 @@ def main():
 
     st.write("Download Test Dataset:")
     test_dataset_file = "test.csv"
-    test_dataset_url = "../resources/test.csv"  # replace with the actual URL
-
+    test_dataset_url = os.path.join(os.path.dirname(__file__),"../resources/test.csv")
     with open(test_dataset_url, "rb") as f:
         test_dataset_bytes = f.read()
 
