@@ -28,7 +28,7 @@ def classify_csv(input_file):
     df["target_label"] = classify(list(zip(df["source"], df["log_message"])))
 
     # Save the modified file
-    output_file = "../resources/output.csv"
+    output_file = os.path.join(os.path.dirname(__file__),"../resources/output.csv")
     df.to_csv(output_file, index=False)
 
     return output_file
