@@ -37,6 +37,20 @@ def classify_csv(input_file):
 def main():
     st.title("Log Message Classification")
 
+    st.write("Download Test Dataset:")
+    test_dataset_file = "test.csv"
+    test_dataset_url = "../resources/test.csv"  # replace with the actual URL
+
+    with open(test_dataset_url, "rb") as f:
+        test_dataset_bytes = f.read()
+
+    st.download_button(
+        label="Download Test Dataset",
+        data=test_dataset_bytes,
+        file_name=test_dataset_file,
+        mime="text/csv"
+    )
+
     st.write("Upload a CSV file to classify the log messages:")
     input_file = st.file_uploader("Upload CSV file", type="csv")
 
@@ -47,7 +61,7 @@ def main():
         df = pd.read_csv(output_file)
         st.write(df)
 
-        st.write("Download the modified CSV file:")
+        st.write("Download the modified CSV file with the target labels:")
         st.download_button(
             label="Download CSV",
             data=df.to_csv(index=False),
