@@ -1,3 +1,6 @@
+import streamlit as st
+import pandas as pd
+
 from processor_regex import regex_classify
 from processor_bert import bert_classify
 from processor_llm  import llm_classify
@@ -19,18 +22,39 @@ def classify_log(source, log_message):
     return label
 
 def classify_csv(input_file):
-    import pandas as pd
     df = pd.read_csv(input_file)
 
     # Perform classification
     df["target_label"] = classify(list(zip(df["source"], df["log_message"])))
 
     # Save the modified file
-    output_file = "output.csv"
+    output_file = "../resources/output.csv"
     df.to_csv(output_file, index=False)
 
     return output_file
 
 
+def main():
+    st.title("Log Message Classification")
+
+    st.write("Upload a CSV file to classify the log messages:")
+    input_file = st.file_uploader("Upload CSV file", type="csv")
+
+    if input_file is not None:
+        output_file = classify_csv(input_file)
+
+        st.write("Classification results:")
+        df = pd.read_csv(output_file)
+        st.write(df)
+
+        st.write("Download the modified CSV file:")
+        st.download_button(
+            label="Download CSV",
+            data=df.to_csv(index=False),
+            file_name=output_file,
+            mime="text/csv",
+        )
+
+
 if __name__ == "__main__":
-    classify_csv("resources/test.csv")
+    main()
