@@ -13,7 +13,8 @@ def llm_classify(log_msg):
     variant would be "Session timed out for user 9251"
     """
     prompt = f'''Classify the log message into one of these categories: 
-    (1) Workflow Error, (2) Deprecation Warning.
+    (1) Workflow Error, (2) Deprecation Warning, (3) Security Alert, (4) HTTP Status, 
+    (5) System Notification, (6) Resource Usage, (7) User Action
     If you can't figure out a category, use "Unclassified".
     Put the category inside <category> </category> tags. 
     Log message: {log_msg}'''
