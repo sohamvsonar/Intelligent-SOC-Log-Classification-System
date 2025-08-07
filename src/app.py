@@ -150,79 +150,170 @@ def classify_and_display_results(df, store_in_db):
         st.error("CSV must contain 'source' and 'log_message' columns")
         return
     
-    processor = EnhancedLogProcessor()
+    # Check dataset size and recommend processing method
+    total_logs = len(df)
+    use_high_performance = total_logs > 500  # Use high-performance for larger datasets
     
-    try:
-        with st.spinner('Processing logs...'):
-            progress_bar = st.progress(0)
-            results = []
-            
-            logs = list(zip(df['source'], df['log_message']))
-            total_logs = len(logs)
-            
-            for i, (source, log_message) in enumerate(logs):
-                result = processor.classify_and_store(source, log_message, store_in_db)
-                results.append(result)
-                progress_bar.progress((i + 1) / total_logs)
-            
-        # Create results dataframe
-        results_df = pd.DataFrame([
-            {
-                'source': r['source'],
-                'log_message': r['message'],
-                'classification': r['classification'],
-                'confidence_score': r.get('confidence_score'),
-                'severity_score': r['severity_score'],
-                'processing_time_ms': r['processing_time_ms']
-            }
-            for r in results
-        ])
+    if use_high_performance:
+        st.info(f"🚀 Large dataset detected ({total_logs} logs). Using high-performance parallel processing...")
         
-        st.success(f"✅ Processed {len(results)} logs successfully!")
-        
-        # Display results
-        st.subheader("Classification Results")
-        st.dataframe(results_df, use_container_width=True)
-        
-        # Show statistics
-        col1, col2, col3, col4 = st.columns(4)
-        
+        # Performance settings
+        col1, col2 = st.columns(2)
         with col1:
-            st.metric("Total Logs", len(results))
+            max_workers = st.selectbox("Parallel Workers", [2, 4, 6, 8], index=1, 
+                                     help="More workers = faster processing (if you have multiple CPU cores)")
         with col2:
-            avg_time = sum(r['processing_time_ms'] for r in results) / len(results)
-            st.metric("Avg Processing Time", f"{avg_time:.1f}ms")
-        with col3:
-            classifications = [r['classification'] for r in results]
-            unique_classes = len(set(classifications))
-            st.metric("Unique Classifications", unique_classes)
-        with col4:
-            high_severity = sum(1 for r in results if r['severity_score'] >= 7)
-            st.metric("High Severity Logs", high_severity)
+            batch_size = st.selectbox("Batch Size", [50, 100, 200, 500], index=1,
+                                    help="Larger batches = more memory usage but potentially faster")
         
-        # Classification distribution chart
-        if results:
-            classification_counts = pd.Series([r['classification'] for r in results]).value_counts()
-            fig = px.pie(
-                values=classification_counts.values,
-                names=classification_counts.index,
-                title="Classification Distribution"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # Import high-performance processor
+        from processors.high_performance_processor import HighPerformanceLogProcessor
         
-        # Download results
-        csv_output = results_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Results CSV",
-            data=csv_output,
-            file_name=f"classified_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
+        processor = HighPerformanceLogProcessor(
+            max_workers=max_workers,
+            batch_size=batch_size,
+            use_database=store_in_db
         )
         
-    except Exception as e:
-        st.error(f"Error during classification: {str(e)}")
-    finally:
-        processor.close()
+        try:
+            # Create progress tracking
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            def update_progress(completed, total):
+                progress = completed / total
+                progress_bar.progress(progress)
+                status_text.text(f"Processing: {completed}/{total} logs ({progress:.1%})")
+            
+            # Process logs with high-performance processor
+            logs = list(zip(df['source'], df['log_message']))
+            
+            start_time = time.time()
+            results = processor.process_large_dataset(
+                logs, 
+                store_in_db=store_in_db,
+                progress_callback=update_progress
+            )
+            end_time = time.time()
+            
+            status_text.text("✅ Processing completed!")
+            
+        except Exception as e:
+            st.error(f"High-performance processing failed: {str(e)}")
+            st.info("Falling back to standard processing...")
+            use_high_performance = False
+        finally:
+            processor.close()
+    
+    if not use_high_performance:
+        # Use standard processor for smaller datasets or fallback
+        from processors.enhanced_processor import EnhancedLogProcessor
+        processor = EnhancedLogProcessor()
+        
+        try:
+            with st.spinner('Processing logs...'):
+                progress_bar = st.progress(0)
+                results = []
+                
+                logs = list(zip(df['source'], df['log_message']))
+                total_logs = len(logs)
+                
+                start_time = time.time()
+                for i, (source, log_message) in enumerate(logs):
+                    result = processor.classify_and_store(source, log_message, store_in_db)
+                    results.append(result)
+                    progress_bar.progress((i + 1) / total_logs)
+                end_time = time.time()
+        except Exception as e:
+            st.error(f"Standard processing failed: {str(e)}")
+            return
+        finally:
+            processor.close()
+    
+    # Create results dataframe (works for both processing methods)
+    if not results:
+        st.error("No results to display")
+        return
+    
+    # Handle different result formats
+    results_data = []
+    for r in results:
+        row = {
+            'source': r['source'],
+            'log_message': r.get('message', r.get('log_message', '')),
+            'classification': r['classification'],
+            'confidence_score': r.get('confidence_score'),
+            'severity_score': r['severity_score']
+        }
+        
+        # Add processing time if available
+        if 'processing_time_ms' in r:
+            row['processing_time_ms'] = r['processing_time_ms']
+        else:
+            row['processing_time_ms'] = 0  # High-performance processor calculates this differently
+        
+        results_data.append(row)
+    
+    results_df = pd.DataFrame(results_data)
+    
+    # Calculate performance metrics
+    total_time = end_time - start_time
+    avg_time_per_log = (total_time * 1000) / len(results)  # Convert to ms
+    throughput = len(results) / total_time  # logs per second
+    
+    st.success(f"✅ Processed {len(results)} logs successfully!")
+    
+    # Performance summary
+    performance_col1, performance_col2, performance_col3 = st.columns(3)
+    with performance_col1:
+        st.metric("Total Time", f"{total_time:.2f}s")
+    with performance_col2:
+        st.metric("Avg Time/Log", f"{avg_time_per_log:.1f}ms")
+    with performance_col3:
+        st.metric("Throughput", f"{throughput:.1f} logs/sec")
+    
+    # Display results
+    st.subheader("Classification Results")
+    st.dataframe(results_df, use_container_width=True)
+    
+    # Show statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Logs", len(results))
+    with col2:
+        # Use actual processing time if available
+        if use_high_performance:
+            st.metric("Processing Method", "Parallel")
+        else:
+            avg_individual_time = sum(r.get('processing_time_ms', 0) for r in results) / len(results)
+            st.metric("Avg Individual Time", f"{avg_individual_time:.1f}ms")
+    with col3:
+        classifications = [r['classification'] for r in results]
+        unique_classes = len(set(classifications))
+        st.metric("Unique Classifications", unique_classes)
+    with col4:
+        high_severity = sum(1 for r in results if r['severity_score'] >= 7)
+        st.metric("High Severity Logs", high_severity)
+    
+    # Classification distribution chart
+    if results:
+        classification_counts = pd.Series([r['classification'] for r in results]).value_counts()
+        fig = px.pie(
+            values=classification_counts.values,
+            names=classification_counts.index,
+            title="Classification Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Download results
+    csv_output = results_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Results CSV",
+        data=csv_output,
+        file_name=f"classified_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
 
 def analytics_dashboard_page(db_available):
     """Analytics dashboard showing classification trends and metrics"""
