@@ -152,7 +152,15 @@ def classify_and_display_results(df, store_in_db):
     
     # Check dataset size and recommend processing method
     total_logs = len(df)
-    use_high_performance = total_logs > 500  # Use high-performance for larger datasets
+    
+    # Always ask user if they want Slack notifications
+    enable_slack_notifications = st.checkbox(
+        "🔔 Enable Slack Notifications", 
+        value=True,
+        help="Send real-time alerts to Slack for critical events"
+    )
+    
+    use_high_performance = total_logs > 100  # Lower threshold to include test.csv
     
     if use_high_performance:
         st.info(f"🚀 Large dataset detected ({total_logs} logs). Using high-performance parallel processing...")
@@ -172,7 +180,8 @@ def classify_and_display_results(df, store_in_db):
         processor = HighPerformanceLogProcessor(
             max_workers=max_workers,
             batch_size=batch_size,
-            use_database=store_in_db
+            use_database=store_in_db,
+            enable_slack=enable_slack_notifications
         )
         
         try:
@@ -207,6 +216,23 @@ def classify_and_display_results(df, store_in_db):
     
     if not use_high_performance:
         # Use standard processor for smaller datasets or fallback
+        st.info(f"📋 Processing {total_logs} logs with standard processor...")
+        
+        # Import Slack integration for standard processing
+        slack_manager = None
+        if enable_slack_notifications:
+            try:
+                from integrations.slack.slack_integration import get_slack_manager
+                slack_manager = get_slack_manager()
+                if slack_manager.is_available():
+                    st.success("🔔 Slack notifications enabled")
+                else:
+                    st.warning("⚠️ Slack notifications unavailable (check configuration)")
+                    slack_manager = None
+            except Exception as e:
+                st.warning(f"⚠️ Slack integration failed: {str(e)}")
+                slack_manager = None
+        
         from processors.enhanced_processor import EnhancedLogProcessor
         processor = EnhancedLogProcessor()
         
@@ -214,6 +240,7 @@ def classify_and_display_results(df, store_in_db):
             with st.spinner('Processing logs...'):
                 progress_bar = st.progress(0)
                 results = []
+                slack_alerts_sent = 0
                 
                 logs = list(zip(df['source'], df['log_message']))
                 total_logs = len(logs)
@@ -222,8 +249,50 @@ def classify_and_display_results(df, store_in_db):
                 for i, (source, log_message) in enumerate(logs):
                     result = processor.classify_and_store(source, log_message, store_in_db)
                     results.append(result)
+                    
+                    # Send Slack alert for critical events
+                    if slack_manager and result.get('severity_score', 0) >= 8:
+                        try:
+                            import asyncio
+                            import threading
+                            
+                            def send_alert_bg():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    from integrations.slack.slack_integration import notify_log_alert
+                                    loop.run_until_complete(notify_log_alert(result))
+                                finally:
+                                    loop.close()
+                            
+                            alert_thread = threading.Thread(target=send_alert_bg)
+                            alert_thread.daemon = True
+                            alert_thread.start()
+                            slack_alerts_sent += 1
+                            
+                        except Exception as e:
+                            print(f"Failed to send Slack alert: {e}")
+                    
                     progress_bar.progress((i + 1) / total_logs)
+                    
                 end_time = time.time()
+                
+                # Show Slack activity
+                if slack_manager:
+                    if slack_alerts_sent > 0:
+                        st.success(f"📤 Sent {slack_alerts_sent} critical alerts to Slack")
+                    else:
+                        st.info("ℹ️ No critical events detected (severity < 8)")
+                        
+                        # Show severity breakdown for debugging
+                        severity_counts = {}
+                        for result in results:
+                            severity = result.get('severity_score', 0)
+                            severity_range = f"{severity//2*2}-{severity//2*2+1}" if severity < 8 else "8+"
+                            severity_counts[severity_range] = severity_counts.get(severity_range, 0) + 1
+                        
+                        if severity_counts:
+                            st.info(f"Severity distribution: {dict(severity_counts)}")
         except Exception as e:
             st.error(f"Standard processing failed: {str(e)}")
             return

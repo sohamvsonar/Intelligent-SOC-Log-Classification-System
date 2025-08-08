@@ -13,6 +13,7 @@ import os
 import threading
 from queue import Queue
 import numpy as np
+import asyncio
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -22,6 +23,14 @@ from processor_bert import bert_classify
 from processor_llm import llm_classify
 from database.batch_service import BatchDatabaseService
 from database.service import DatabaseService
+
+# Import Slack integration
+try:
+    from integrations.slack.slack_integration import get_slack_manager, notify_log_alert, notify_batch_complete
+    SLACK_AVAILABLE = True
+except ImportError as e:
+    print(f"Slack integration not available: {e}")
+    SLACK_AVAILABLE = False
 
 class ModelCache:
     """Thread-safe model cache for sharing models across workers"""
@@ -210,7 +219,8 @@ def classify_single_log_fallback(source: str, log_message: str) -> Dict[str, Any
 class HighPerformanceLogProcessor:
     """High-performance log processor with parallel processing and batch operations"""
     
-    def __init__(self, max_workers: int = None, batch_size: int = 100, use_database: bool = True):
+    def __init__(self, max_workers: int = None, batch_size: int = 100, 
+                 use_database: bool = True, enable_slack: bool = True):
         """
         Initialize the high-performance processor
         
@@ -218,10 +228,25 @@ class HighPerformanceLogProcessor:
             max_workers: Number of parallel workers (default: CPU count)
             batch_size: Number of logs to process in each batch
             use_database: Whether to use database storage
+            enable_slack: Whether to enable Slack notifications
         """
         self.max_workers = max_workers or min(mp.cpu_count(), 8)  # Cap at 8 to avoid overwhelming
         self.batch_size = batch_size
         self.use_database = use_database
+        self.enable_slack = enable_slack and SLACK_AVAILABLE
+        
+        # Initialize Slack integration
+        if self.enable_slack:
+            try:
+                self.slack_manager = get_slack_manager()
+                if self.slack_manager.is_available():
+                    print("✅ Slack notifications enabled")
+                else:
+                    self.enable_slack = False
+                    print("⚠️ Slack notifications disabled - connection failed")
+            except Exception as e:
+                self.enable_slack = False
+                print(f"⚠️ Slack notifications disabled due to error: {e}")
         
         # Initialize model cache
         model_cache.initialize_models()
@@ -424,6 +449,7 @@ class HighPerformanceLogProcessor:
         total_time = time.time() - total_start_time
         
         # Performance summary
+        processing_stats = {}
         if results:
             print(f"\n=== Performance Summary ===")
             print(f"Total logs processed: {len(results)}")
@@ -431,16 +457,94 @@ class HighPerformanceLogProcessor:
             print(f"Average per log: {(total_time * 1000) / len(results):.1f}ms")
             print(f"Throughput: {len(results) / total_time:.1f} logs/second")
             
+            # Prepare stats for Slack notification
+            processing_stats = {
+                'total_logs': len(results),
+                'total_time': total_time,
+                'avg_time_per_log': (total_time * 1000) / len(results),
+                'throughput': len(results) / total_time
+            }
+            
             # Classification distribution
             classifications = {}
+            high_severity_count = 0
+            critical_count = 0
+            
             for result in results:
                 classification = result['classification']
                 classifications[classification] = classifications.get(classification, 0) + 1
+                
+                severity = result.get('severity_score', 0)
+                if severity >= 8:
+                    critical_count += 1
+                elif severity >= 6:
+                    high_severity_count += 1
             
             print(f"\nClassification Distribution:")
             for classification, count in classifications.items():
                 percentage = (count / len(results)) * 100
                 print(f"  {classification}: {count} ({percentage:.1f}%)")
+            
+            print(f"\nSeverity Summary:")
+            print(f"  Critical (8+): {critical_count}")
+            print(f"  High (6-7): {high_severity_count}")
+            
+            processing_stats.update({
+                'critical_count': critical_count,
+                'high_severity_count': high_severity_count,
+                'classifications': classifications
+            })
+            
+            # Send Slack notifications asynchronously if enabled
+            if self.enable_slack:
+                try:
+                    # Send individual alerts for critical events
+                    critical_alerts_sent = 0
+                    for result in results:
+                        if result.get('severity_score', 0) >= 8:  # Critical alerts
+                            try:
+                                # Run async notification in background thread
+                                def send_alert_bg():
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                    try:
+                                        loop.run_until_complete(notify_log_alert(result))
+                                    finally:
+                                        loop.close()
+                                
+                                import threading
+                                alert_thread = threading.Thread(target=send_alert_bg)
+                                alert_thread.daemon = True
+                                alert_thread.start()
+                                critical_alerts_sent += 1
+                                
+                            except Exception as e:
+                                print(f"⚠️ Failed to send critical alert: {e}")
+                    
+                    if critical_alerts_sent > 0:
+                        print(f"📤 Sent {critical_alerts_sent} critical alerts to Slack")
+                    
+                    # Send batch summary for significant batches
+                    if len(results) >= 100 or high_severity_count >= 5:
+                        try:
+                            def send_batch_summary_bg():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    loop.run_until_complete(notify_batch_complete(results, processing_stats))
+                                finally:
+                                    loop.close()
+                            
+                            summary_thread = threading.Thread(target=send_batch_summary_bg)
+                            summary_thread.daemon = True
+                            summary_thread.start()
+                            print("📤 Batch summary sent to Slack")
+                            
+                        except Exception as e:
+                            print(f"⚠️ Failed to send batch summary: {e}")
+                    
+                except Exception as e:
+                    print(f"⚠️ Slack notification error: {e}")
         
         return results
     
