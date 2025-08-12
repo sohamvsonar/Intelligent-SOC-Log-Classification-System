@@ -44,7 +44,6 @@ The Slack integration provides:
 
 3. **Scroll up and click "Install to Workspace"**
 4. **Copy the "Bot User OAuth Token"** (starts with `xoxb-`)
-xoxb-9317410780771-9321999980965-wrompHucwjTXPKLpqYKYl6Mv
 ### Step 3: Create Slack Channels
 
 Create the following channels in your Slack workspace:
