@@ -6,12 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import time
 
-# Import enhanced processor and database components
-from processors.enhanced_processor import EnhancedLogProcessor
-from database.connection import create_database, init_database
-from database.service import DatabaseService
-
-# Import legacy processors for backward compatibility
+# Import legacy processors for log classification
 from processor_regex import regex_classify
 from processor_bert import bert_classify
 from processor_llm import llm_classify
@@ -46,20 +41,11 @@ def classify_csv(input_file):
 
 
 def init_app():
-    """Initialize the application and database"""
-    if 'db_initialized' not in st.session_state:
-        with st.spinner('Initializing database...'):
-            if create_database():
-                if init_database():
-                    st.session_state.db_initialized = True
-                    st.success("Database initialized successfully!")
-                else:
-                    st.error("Failed to initialize database tables")
-                    return False
-            else:
-                st.error("Failed to connect to database. Using file-only mode.")
-                st.session_state.db_initialized = False
-    return st.session_state.get('db_initialized', False)
+    """Initialize the application"""
+    if 'app_initialized' not in st.session_state:
+        st.session_state.app_initialized = True
+        st.success("Application initialized successfully!")
+    return True
 
 def main():
     st.set_page_config(
@@ -70,32 +56,24 @@ def main():
     )
     
     st.title("🔐 SOC Log Analysis Platform")
-    st.markdown("*Phase 1: Enhanced Log Classification with Database Integration*")
+    st.markdown("*Streamlit Demo Version - Log Classification System*")
     
-    # Initialize database
-    db_available = init_app()
+    # Initialize app
+    app_available = init_app()
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Page",
-        ["Log Classification", "Analytics Dashboard", "Grafana Dashboard", "Log History", "Single Log Test", "System Status"]
+        ["Log Classification", "Single Log Test"]
     )
     
     if page == "Log Classification":
-        log_classification_page(db_available)
-    elif page == "Analytics Dashboard":
-        analytics_dashboard_page(db_available)
-    elif page == "Grafana Dashboard":
-        grafana_dashboard_page(db_available)
-    elif page == "Log History":
-        log_history_page(db_available)
+        log_classification_page()
     elif page == "Single Log Test":
-        single_log_test_page(db_available)
-    elif page == "System Status":
-        system_status_page(db_available)
+        single_log_test_page()
 
-def log_classification_page(db_available):
+def log_classification_page():
     """Original log classification functionality with enhancements"""
     st.header("📊 Batch Log Classification")
     
@@ -119,13 +97,8 @@ def log_classification_page(db_available):
             st.warning("Test dataset not found")
     
     with col2:
-        st.write("**Storage Options:**")
-        store_in_db = st.checkbox(
-            "Store results in database", 
-            value=db_available,
-            disabled=not db_available,
-            help="Store classification results in PostgreSQL for analytics"
-        )
+        st.write("**Processing Mode:**")
+        st.info("📁 File-only mode (no database storage)")
     
     # File upload and processing
     st.write("**Upload CSV file to classify log messages:**")
@@ -141,251 +114,59 @@ def log_classification_page(db_available):
                 st.write(df.head())
             
             if st.button("🔍 Classify Logs", type="primary"):
-                classify_and_display_results(df, store_in_db)
+                classify_and_display_results(df)
                 
         except Exception as e:
             st.error(f"Error reading CSV file: {str(e)}")
 
-def classify_and_display_results(df, store_in_db):
-    """Classify logs and display results with enhanced metrics"""
+def classify_and_display_results(df):
+    """Classify logs and display results - simplified for Streamlit demo"""
     if 'source' not in df.columns or 'log_message' not in df.columns:
         st.error("CSV must contain 'source' and 'log_message' columns")
         return
     
-    # Check dataset size and recommend processing method
     total_logs = len(df)
+    st.info(f"📋 Processing {total_logs} logs...")
     
-    # Integration options
-    col1, col2 = st.columns(2)
-    with col1:
-        enable_slack_notifications = st.checkbox(
-            "🔔 Enable Slack Notifications", 
-            value=True,
-            help="Send real-time alerts to Slack for critical events"
-        )
-    with col2:
-        enable_jira_incidents = st.checkbox(
-            "🎫 Enable JIRA Incident Creation", 
-            value=True,
-            help="Automatically create JIRA tickets for high-severity security events"
-        )
+    # Simple classification without database or integrations
+    results = []
+    logs = list(zip(df['source'], df['log_message']))
     
-    use_high_performance = total_logs > 100  # Lower threshold to include test.csv
+    start_time = time.time()
     
-    if use_high_performance:
-        st.info(f"🚀 Large dataset detected ({total_logs} logs). Using high-performance parallel processing...")
+    with st.spinner('Processing logs...'):
+        progress_bar = st.progress(0)
         
-        # Performance settings
-        col1, col2 = st.columns(2)
-        with col1:
-            max_workers = st.selectbox("Parallel Workers", [2, 4, 6, 8], index=1, 
-                                     help="More workers = faster processing (if you have multiple CPU cores)")
-        with col2:
-            batch_size = st.selectbox("Batch Size", [50, 100, 200, 500], index=1,
-                                    help="Larger batches = more memory usage but potentially faster")
-        
-        # Import high-performance processor
-        from processors.high_performance_processor import HighPerformanceLogProcessor
-        
-        processor = HighPerformanceLogProcessor(
-            max_workers=max_workers,
-            batch_size=batch_size,
-            use_database=store_in_db,
-            enable_slack=enable_slack_notifications,
-            enable_jira=enable_jira_incidents
-        )
-        
-        try:
-            # Create progress tracking
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+        for i, (source, log_message) in enumerate(logs):
+            # Use the same classification logic from classify_log function
+            classification = classify_log(source, log_message)
             
-            def update_progress(completed, total):
-                progress = completed / total
-                progress_bar.progress(progress)
-                status_text.text(f"Processing: {completed}/{total} logs ({progress:.1%})")
+            # Simple severity scoring based on classification
+            severity_map = {
+                'ERROR': 8,
+                'CRITICAL': 9,
+                'WARNING': 6,
+                'INFO': 3,
+                'DEBUG': 1
+            }
+            severity_score = severity_map.get(classification, 5)
             
-            # Process logs with high-performance processor
-            logs = list(zip(df['source'], df['log_message']))
+            result = {
+                'source': source,
+                'log_message': log_message,
+                'classification': classification,
+                'confidence_score': 0.85,  # Static confidence for demo
+                'severity_score': severity_score,
+                'processing_time_ms': 10  # Static processing time for demo
+            }
+            results.append(result)
             
-            start_time = time.time()
-            results = processor.process_large_dataset(
-                logs, 
-                store_in_db=store_in_db,
-                progress_callback=update_progress
-            )
-            end_time = time.time()
-            
-            status_text.text("✅ Processing completed!")
-            
-        except Exception as e:
-            st.error(f"High-performance processing failed: {str(e)}")
-            st.info("Falling back to standard processing...")
-            use_high_performance = False
-        finally:
-            processor.close()
+            progress_bar.progress((i + 1) / total_logs)
     
-    if not use_high_performance:
-        # Use standard processor for smaller datasets or fallback
-        st.info(f"📋 Processing {total_logs} logs with standard processor...")
-        
-        # Import Slack integration for standard processing
-        slack_manager = None
-        if enable_slack_notifications:
-            try:
-                from integrations.slack.slack_integration import get_slack_manager
-                slack_manager = get_slack_manager()
-                if slack_manager.is_available():
-                    st.success("🔔 Slack notifications enabled")
-                else:
-                    st.warning("⚠️ Slack notifications unavailable (check configuration)")
-                    slack_manager = None
-            except Exception as e:
-                st.warning(f"⚠️ Slack integration failed: {str(e)}")
-                slack_manager = None
-        
-        # Import JIRA integration for standard processing
-        jira_manager = None
-        if enable_jira_incidents:
-            try:
-                from integrations.jira.jira_integration import get_jira_manager
-                jira_manager = get_jira_manager()
-                if jira_manager.is_available():
-                    st.success("🎫 JIRA incident creation enabled")
-                else:
-                    st.warning("⚠️ JIRA integration unavailable (check configuration)")
-                    jira_manager = None
-            except Exception as e:
-                st.warning(f"⚠️ JIRA integration failed: {str(e)}")
-                jira_manager = None
-        
-        from processors.enhanced_processor import EnhancedLogProcessor
-        processor = EnhancedLogProcessor()
-        
-        try:
-            with st.spinner('Processing logs...'):
-                progress_bar = st.progress(0)
-                results = []
-                slack_alerts_sent = 0
-                jira_incidents_created = 0
-                
-                logs = list(zip(df['source'], df['log_message']))
-                total_logs = len(logs)
-                
-                start_time = time.time()
-                for i, (source, log_message) in enumerate(logs):
-                    result = processor.classify_and_store(source, log_message, store_in_db)
-                    results.append(result)
-                    
-                    # Send Slack alert for critical events
-                    if slack_manager and result.get('severity_score', 0) >= 8:
-                        try:
-                            import asyncio
-                            import threading
-                            
-                            def send_alert_bg():
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                try:
-                                    from integrations.slack.slack_integration import notify_log_alert
-                                    loop.run_until_complete(notify_log_alert(result))
-                                finally:
-                                    loop.close()
-                            
-                            alert_thread = threading.Thread(target=send_alert_bg)
-                            alert_thread.daemon = True
-                            alert_thread.start()
-                            slack_alerts_sent += 1
-                            
-                        except Exception as e:
-                            print(f"Failed to send Slack alert: {e}")
-                    
-                    # Create JIRA incident for critical security events
-                    if jira_manager and result.get('severity_score', 0) >= 8:
-                        try:
-                            import asyncio
-                            import threading
-                            
-                            def create_incident_bg():
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                try:
-                                    from integrations.jira.jira_integration import create_incident
-                                    incident = loop.run_until_complete(create_incident(result))
-                                    if incident:
-                                        return True
-                                finally:
-                                    loop.close()
-                                return False
-                            
-                            incident_thread = threading.Thread(target=create_incident_bg)
-                            incident_thread.daemon = True
-                            incident_thread.start()
-                            incident_thread.join()
-                            jira_incidents_created += 1
-                            
-                        except Exception as e:
-                            print(f"Failed to create JIRA incident: {e}")
-                    
-                    progress_bar.progress((i + 1) / total_logs)
-                    
-                end_time = time.time()
-                
-                # Show Slack activity
-                if slack_manager:
-                    if slack_alerts_sent > 0:
-                        st.success(f"📤 Sent {slack_alerts_sent} critical alerts to Slack")
-                    else:
-                        st.info("ℹ️ No critical events detected (severity < 8)")
-                        
-                        # Show severity breakdown for debugging
-                        severity_counts = {}
-                        for result in results:
-                            severity = result.get('severity_score', 0)
-                            severity_range = f"{severity//2*2}-{severity//2*2+1}" if severity < 8 else "8+"
-                            severity_counts[severity_range] = severity_counts.get(severity_range, 0) + 1
-                        
-                        if severity_counts:
-                            st.info(f"Severity distribution: {dict(severity_counts)}")
-                
-                # Show JIRA activity
-                if jira_manager:
-                    if jira_incidents_created > 0:
-                        st.success(f"🎫 Created {jira_incidents_created} JIRA incidents for critical events")
-                    else:
-                        if enable_jira_incidents:
-                            st.info("ℹ️ No JIRA incidents created (severity < 8)")
-        except Exception as e:
-            st.error(f"Standard processing failed: {str(e)}")
-            return
-        finally:
-            processor.close()
+    end_time = time.time()
     
-    # Create results dataframe (works for both processing methods)
-    if not results:
-        st.error("No results to display")
-        return
-    
-    # Handle different result formats
-    results_data = []
-    for r in results:
-        row = {
-            'source': r['source'],
-            'log_message': r.get('message', r.get('log_message', '')),
-            'classification': r['classification'],
-            'confidence_score': r.get('confidence_score'),
-            'severity_score': r['severity_score']
-        }
-        
-        # Add processing time if available
-        if 'processing_time_ms' in r:
-            row['processing_time_ms'] = r['processing_time_ms']
-        else:
-            row['processing_time_ms'] = 0  # High-performance processor calculates this differently
-        
-        results_data.append(row)
-    
-    results_df = pd.DataFrame(results_data)
+    # Create results dataframe
+    results_df = pd.DataFrame(results)
     
     # Calculate performance metrics
     total_time = end_time - start_time
@@ -413,12 +194,7 @@ def classify_and_display_results(df, store_in_db):
     with col1:
         st.metric("Total Logs", len(results))
     with col2:
-        # Use actual processing time if available
-        if use_high_performance:
-            st.metric("Processing Method", "Parallel")
-        else:
-            avg_individual_time = sum(r.get('processing_time_ms', 0) for r in results) / len(results)
-            st.metric("Avg Individual Time", f"{avg_individual_time:.1f}ms")
+        st.metric("Processing Method", "Standard")
     with col3:
         classifications = [r['classification'] for r in results]
         unique_classes = len(set(classifications))
@@ -446,344 +222,7 @@ def classify_and_display_results(df, store_in_db):
         mime="text/csv"
     )
 
-def analytics_dashboard_page(db_available):
-    """Analytics dashboard showing classification trends and metrics"""
-    st.header("📈 Analytics Dashboard")
-    
-    if not db_available:
-        st.warning("Database not available. Analytics require database connection.")
-        return
-    
-    processor = EnhancedLogProcessor()
-    
-    try:
-        # Get analytics data
-        analytics = processor.get_analytics_summary()
-        
-        if 'error' in analytics:
-            st.error(f"Error loading analytics: {analytics['error']}")
-            return
-        
-        # Key metrics
-        col1, col2, col3 = st.columns(3)
-        
-        volume_stats = analytics.get('volume_statistics', {})
-        with col1:
-            st.metric(
-                "Total Logs (24h)", 
-                volume_stats.get('total_logs', 0)
-            )
-        with col2:
-            st.metric(
-                "Average Confidence", 
-                f"{volume_stats.get('average_confidence', 0):.3f}"
-            )
-        with col3:
-            classification_dist = analytics.get('classification_distribution', {})
-            total_classifications = sum(classification_dist.values())
-            st.metric("Total Classifications", total_classifications)
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Classification distribution
-            if classification_dist:
-                fig = px.bar(
-                    x=list(classification_dist.keys()),
-                    y=list(classification_dist.values()),
-                    title="Classification Distribution (7 days)",
-                    labels={'x': 'Classification', 'y': 'Count'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Severity distribution
-            severity_dist = analytics.get('severity_distribution', {})
-            if severity_dist:
-                fig = px.pie(
-                    values=list(severity_dist.values()),
-                    names=list(severity_dist.keys()),
-                    title="Severity Distribution (7 days)"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Refresh button
-        if st.button("🔄 Refresh Data"):
-            st.rerun()
-            
-    except Exception as e:
-        st.error(f"Error loading dashboard: {str(e)}")
-    finally:
-        processor.close()
-
-def grafana_dashboard_page(db_available):
-    """Grafana dashboard integration page"""
-    st.header("📈 Grafana Analytics Dashboard")
-    
-    # Introduction
-    st.markdown("""
-    Welcome to the SOC Grafana Dashboard integration. This provides advanced analytics and visualizations
-    for your log data using Grafana's powerful charting capabilities.
-    """)
-    
-    # Status checks
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.subheader("🗄️ Database Status")
-        if db_available:
-            st.success("✅ Connected")
-            # Get log count
-            try:
-                from database.service import DatabaseService
-                db_service = DatabaseService()
-                log_count = db_service.get_log_count()
-                st.metric("Total Logs", log_count)
-            except Exception as e:
-                st.warning(f"Could not fetch log count: {e}")
-        else:
-            st.error("❌ Disconnected")
-    
-    with col2:
-        st.subheader("🚀 API Status")
-        try:
-            import requests
-            api_url = "http://localhost:8002"
-            response = requests.get(f"{api_url}/", timeout=5)
-            if response.status_code == 200:
-                st.success("✅ Running")
-                st.caption(f"API URL: {api_url}")
-            else:
-                st.error(f"❌ Error (Status: {response.status_code})")
-        except Exception as e:
-            st.error("❌ Not Running")
-            st.caption("Start with: python src/integrations/grafana/grafana_api.py")
-    
-    with col3:
-        st.subheader("📊 Grafana Status") 
-        try:
-            import requests
-            grafana_url = "http://localhost:3000"
-            response = requests.get(f"{grafana_url}/api/health", timeout=5)
-            if response.status_code == 200:
-                st.success("✅ Running")
-                st.caption(f"Grafana URL: {grafana_url}")
-            else:
-                st.error(f"❌ Error (Status: {response.status_code})")
-        except Exception as e:
-            st.error("❌ Not Running")
-            st.caption("Start with Docker or install Grafana")
-    
-    st.divider()
-    
-    # Quick start guide
-    with st.expander("🚀 Quick Start Guide", expanded=False):
-        st.markdown("""
-        ### Step 1: Start Required Services
-        
-        **Start SOC API Server:**
-        ```bash
-        cd src/integrations/grafana
-        python grafana_api.py
-        ```
-        
-        **Start Grafana (Docker):**
-        ```bash
-        docker-compose -f docker-compose-grafana.yml up -d
-        ```
-        
-        **Or start Grafana manually:**
-        ```bash
-        docker run -d -p 3000:3000 -e "GF_INSTALL_PLUGINS=grafana-simple-json-datasource" grafana/grafana
-        ```
-        
-        ### Step 2: Setup Grafana
-        ```bash
-        cd src/integrations/grafana
-        python grafana_setup.py
-        ```
-        
-        ### Step 3: Access Dashboard
-        - Open [Grafana](http://localhost:3000) (admin/socsystem)
-        - Navigate to SOC Dashboard
-        - Configure time range (last 7 days recommended)
-        """)
-    
-    # Action buttons
-    st.subheader("🎛️ Dashboard Actions")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("🚀 Start API Server", help="Start the SOC API server for Grafana"):
-            with st.spinner("Starting API server..."):
-                try:
-                    import subprocess
-                    import os
-                    
-                    api_script = os.path.join("src", "integrations", "grafana", "grafana_api.py")
-                    if os.path.exists(api_script):
-                        # Start in background
-                        subprocess.Popen([
-                            "python", api_script
-                        ], cwd=os.getcwd())
-                        st.success("🚀 API server started in background")
-                        time.sleep(2)
-                        st.experimental_rerun()
-                    else:
-                        st.error("API script not found")
-                except Exception as e:
-                    st.error(f"Failed to start API server: {e}")
-    
-    with col2:
-        if st.button("📊 Open Grafana", help="Open Grafana in new tab"):
-            st.markdown('[🔗 Open Grafana Dashboard](http://localhost:3000)', unsafe_allow_html=True)
-            st.balloons()
-    
-    with col3:
-        if st.button("🔧 Setup Grafana", help="Run Grafana setup script"):
-            with st.spinner("Setting up Grafana..."):
-                try:
-                    import subprocess
-                    import os
-                    
-                    setup_script = os.path.join("src", "integrations", "grafana", "grafana_setup.py")
-                    if os.path.exists(setup_script):
-                        result = subprocess.run([
-                            "python", setup_script
-                        ], capture_output=True, text=True, cwd=os.getcwd())
-                        
-                        if result.returncode == 0:
-                            st.success("✅ Grafana setup completed!")
-                            st.code(result.stdout)
-                        else:
-                            st.error("❌ Setup failed")
-                            st.code(result.stderr)
-                    else:
-                        st.error("Setup script not found")
-                except Exception as e:
-                    st.error(f"Setup failed: {e}")
-    
-    with col4:
-        if st.button("📈 View Stats", help="Show API statistics"):
-            try:
-                import requests
-                response = requests.get("http://localhost:8002/stats/summary", timeout=5)
-                if response.status_code == 200:
-                    stats = response.json()
-                    st.json(stats)
-                else:
-                    st.error("Failed to get stats")
-            except Exception as e:
-                st.error(f"API not available: {e}")
-    
-    st.divider()
-    
-    # Embedded preview (if possible)
-    st.subheader("🖼️ Dashboard Preview")
-    
-    # Try to show recent logs from API
-    try:
-        import requests
-        response = requests.get("http://localhost:8002/logs/recent?limit=10", timeout=5)
-        if response.status_code == 200:
-            logs_data = response.json()
-            if logs_data:
-                st.success("✅ API is serving data to Grafana")
-                
-                # Show recent logs in a table
-                df = pd.DataFrame(logs_data)
-                st.dataframe(df, use_container_width=True)
-                
-                # Show quick stats
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    avg_severity = df['severity_score'].mean() if 'severity_score' in df else 0
-                    st.metric("Avg Severity", f"{avg_severity:.1f}")
-                with col2:
-                    critical_count = len(df[df['severity_score'] >= 8]) if 'severity_score' in df else 0
-                    st.metric("Critical Events", critical_count)
-                with col3:
-                    unique_sources = df['source'].nunique() if 'source' in df else 0
-                    st.metric("Unique Sources", unique_sources)
-            else:
-                st.info("No recent logs found. Process some logs first.")
-        else:
-            st.warning("API is not responding. Please start the API server.")
-    except Exception as e:
-        st.info("API not available. Start the API server to see live data.")
-    
-    # Instructions for embedding Grafana
-    with st.expander("🔗 Advanced: Embed Grafana Dashboard", expanded=False):
-        st.markdown("""
-        To embed Grafana dashboard directly in Streamlit:
-        
-        1. Enable anonymous access in Grafana
-        2. Get the dashboard embed URL
-        3. Use st.components.v1.iframe() to display
-        
-        **Example:**
-        ```python
-        import streamlit.components.v1 as components
-        components.iframe("http://localhost:3000/d-solo/dashboard-uid/dashboard-name", height=600)
-        ```
-        """)
-
-def log_history_page(db_available):
-    """View historical log data from database"""
-    st.header("📋 Log History")
-    
-    if not db_available:
-        st.warning("Database not available. Cannot display log history.")
-        return
-    
-    processor = EnhancedLogProcessor()
-    
-    try:
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            limit = st.selectbox("Number of logs", [50, 100, 200, 500], index=1)
-        with col2:
-            source_filter = st.text_input("Filter by source (optional)")
-        with col3:
-            classification_filter = st.text_input("Filter by classification (optional)")
-        
-        # Get logs
-        logs = processor.get_recent_logs(
-            limit=limit,
-            source=source_filter if source_filter else None,
-            classification=classification_filter if classification_filter else None
-        )
-        
-        if logs:
-            # Convert to dataframe
-            log_data = []
-            for log in logs:
-                log_data.append({
-                    'Timestamp': log.timestamp,
-                    'Source': log.source,
-                    'Message': log.message[:100] + '...' if len(log.message) > 100 else log.message,
-                    'Classification': log.classification,
-                    'Confidence': log.confidence_score,
-                    'Severity': log.severity_score
-                })
-            
-            df = pd.DataFrame(log_data)
-            st.dataframe(df, use_container_width=True)
-            
-            st.write(f"Showing {len(logs)} logs")
-        else:
-            st.info("No logs found matching the criteria")
-            
-    except Exception as e:
-        st.error(f"Error loading log history: {str(e)}")
-    finally:
-        processor.close()
-
-def single_log_test_page(db_available):
+def single_log_test_page():
     """Test single log classification"""
     st.header("🔍 Single Log Test")
     
@@ -804,84 +243,45 @@ def single_log_test_page(db_available):
                 placeholder="Enter your log message here..."
             )
         
-        store_result = st.checkbox(
-            "Store in database", 
-            value=db_available and True,
-            disabled=not db_available
-        )
+        st.info("📝 Demo mode - results not stored")
         
         submitted = st.form_submit_button("🔍 Classify Log", type="primary")
     
     if submitted and log_message:
-        processor = EnhancedLogProcessor()
-        
         try:
             with st.spinner('Classifying log...'):
-                result = processor.classify_and_store(
-                    source, log_message, store_in_db=store_result
-                )
+                start_time = time.time()
+                classification = classify_log(source, log_message)
+                end_time = time.time()
+                
+                # Simple severity scoring based on classification
+                severity_map = {
+                    'ERROR': 8,
+                    'CRITICAL': 9,
+                    'WARNING': 6,
+                    'INFO': 3,
+                    'DEBUG': 1
+                }
+                severity_score = severity_map.get(classification, 5)
+                processing_time_ms = (end_time - start_time) * 1000
             
             # Display results
             st.subheader("Classification Result")
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Classification", result['classification'])
+                st.metric("Classification", classification)
             with col2:
-                confidence = result.get('confidence_score')
-                if confidence is not None:
-                    st.metric("Confidence", f"{confidence:.3f}")
-                else:
-                    st.metric("Confidence", "N/A")
+                st.metric("Confidence", "0.85")  # Static confidence for demo
             with col3:
-                st.metric("Severity Score", result['severity_score'])
+                st.metric("Severity Score", severity_score)
             
             # Additional info
-            st.info(f"Processing time: {result['processing_time_ms']}ms")
-            
-            if 'log_event_id' in result:
-                st.success(f"Stored in database with ID: {result['log_event_id']}")
+            st.info(f"Processing time: {processing_time_ms:.1f}ms")
+            st.success("✅ Classification completed (demo mode)")
             
         except Exception as e:
             st.error(f"Error classifying log: {str(e)}")
-        finally:
-            processor.close()
-
-def system_status_page(db_available):
-    """System status and health monitoring"""
-    st.header("⚡ System Status")
-    
-    # Database status
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if db_available:
-            st.success("✅ Database Connected")
-        else:
-            st.error("❌ Database Disconnected")
-    
-    with col2:
-        st.info(f"🕒 Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Test database connection
-    if st.button("🔄 Test Database Connection"):
-        with st.spinner('Testing connection...'):
-            db_status = create_database()
-            if db_status:
-                st.success("Database connection successful!")
-            else:
-                st.error("Database connection failed!")
-    
-    # Environment info
-    st.subheader("Environment Information")
-    env_info = {
-        "Python Path": os.path.dirname(__file__),
-        "Database URL": os.getenv('DATABASE_URL', 'Not configured'),
-        "Timestamp": datetime.now().isoformat()
-    }
-    
-    for key, value in env_info.items():
-        st.text(f"{key}: {value}")
 
 
 if __name__ == "__main__":
