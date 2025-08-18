@@ -32,6 +32,14 @@ except ImportError as e:
     print(f"Slack integration not available: {e}")
     SLACK_AVAILABLE = False
 
+# Import JIRA integration
+try:
+    from integrations.jira.jira_integration import get_jira_manager, create_incident
+    JIRA_AVAILABLE = True
+except ImportError as e:
+    print(f"JIRA integration not available: {e}")
+    JIRA_AVAILABLE = False
+
 class ModelCache:
     """Thread-safe model cache for sharing models across workers"""
     _instance = None
@@ -220,7 +228,7 @@ class HighPerformanceLogProcessor:
     """High-performance log processor with parallel processing and batch operations"""
     
     def __init__(self, max_workers: int = None, batch_size: int = 100, 
-                 use_database: bool = True, enable_slack: bool = True):
+                 use_database: bool = True, enable_slack: bool = True, enable_jira: bool = True):
         """
         Initialize the high-performance processor
         
@@ -229,11 +237,13 @@ class HighPerformanceLogProcessor:
             batch_size: Number of logs to process in each batch
             use_database: Whether to use database storage
             enable_slack: Whether to enable Slack notifications
+            enable_jira: Whether to enable JIRA incident creation
         """
         self.max_workers = max_workers or min(mp.cpu_count(), 8)  # Cap at 8 to avoid overwhelming
         self.batch_size = batch_size
         self.use_database = use_database
         self.enable_slack = enable_slack and SLACK_AVAILABLE
+        self.enable_jira = enable_jira and JIRA_AVAILABLE
         
         # Initialize Slack integration
         if self.enable_slack:
@@ -247,6 +257,19 @@ class HighPerformanceLogProcessor:
             except Exception as e:
                 self.enable_slack = False
                 print(f"⚠️ Slack notifications disabled due to error: {e}")
+        
+        # Initialize JIRA integration
+        if self.enable_jira:
+            try:
+                self.jira_manager = get_jira_manager()
+                if self.jira_manager.is_available():
+                    print("✅ JIRA incident management enabled")
+                else:
+                    self.enable_jira = False
+                    print("⚠️ JIRA integration disabled - connection failed")
+            except Exception as e:
+                self.enable_jira = False
+                print(f"⚠️ JIRA integration disabled due to error: {e}")
         
         # Initialize model cache
         model_cache.initialize_models()
@@ -495,34 +518,67 @@ class HighPerformanceLogProcessor:
                 'classifications': classifications
             })
             
-            # Send Slack notifications asynchronously if enabled
-            if self.enable_slack:
+            # Send notifications and create incidents asynchronously if enabled
+            notifications_sent = {
+                'slack_alerts': 0,
+                'jira_incidents': 0
+            }
+            
+            if self.enable_slack or self.enable_jira:
                 try:
-                    # Send individual alerts for critical events
-                    critical_alerts_sent = 0
+                    # Process critical events for notifications and incidents
                     for result in results:
-                        if result.get('severity_score', 0) >= 8:  # Critical alerts
-                            try:
-                                # Run async notification in background thread
-                                def send_alert_bg():
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
+                        severity_score = result.get('severity_score', 0)
+                        
+                        if severity_score >= 8:  # Critical events
+                            # Send Slack alert
+                            if self.enable_slack:
+                                try:
+                                    def send_alert_bg():
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        try:
+                                            loop.run_until_complete(notify_log_alert(result))
+                                        finally:
+                                            loop.close()
+                                    
+                                    import threading
+                                    alert_thread = threading.Thread(target=send_alert_bg)
+                                    alert_thread.daemon = True
+                                    alert_thread.start()
+                                    notifications_sent['slack_alerts'] += 1
+                                    
+                                except Exception as e:
+                                    print(f"⚠️ Failed to send Slack alert: {e}")
+                            
+                            # Create JIRA incident for security/critical events
+                            if self.enable_jira:
+                                classification = result.get('classification', '')
+                                if ('Security' in classification or 'Critical' in classification or 
+                                    severity_score >= 9):  # Very critical or security-related
                                     try:
-                                        loop.run_until_complete(notify_log_alert(result))
-                                    finally:
-                                        loop.close()
-                                
-                                import threading
-                                alert_thread = threading.Thread(target=send_alert_bg)
-                                alert_thread.daemon = True
-                                alert_thread.start()
-                                critical_alerts_sent += 1
-                                
-                            except Exception as e:
-                                print(f"⚠️ Failed to send critical alert: {e}")
+                                        def create_incident_bg():
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            try:
+                                                loop.run_until_complete(create_incident(result))
+                                            finally:
+                                                loop.close()
+                                        
+                                        incident_thread = threading.Thread(target=create_incident_bg)
+                                        incident_thread.daemon = True
+                                        incident_thread.start()
+                                        notifications_sent['jira_incidents'] += 1
+                                        
+                                    except Exception as e:
+                                        print(f"⚠️ Failed to create JIRA incident: {e}")
                     
-                    if critical_alerts_sent > 0:
-                        print(f"📤 Sent {critical_alerts_sent} critical alerts to Slack")
+                    # Report notification activity
+                    if notifications_sent['slack_alerts'] > 0:
+                        print(f"📤 Sent {notifications_sent['slack_alerts']} critical alerts to Slack")
+                    
+                    if notifications_sent['jira_incidents'] > 0:
+                        print(f"🎫 Created {notifications_sent['jira_incidents']} JIRA incidents")
                     
                     # Send batch summary for significant batches
                     if len(results) >= 100 or high_severity_count >= 5:

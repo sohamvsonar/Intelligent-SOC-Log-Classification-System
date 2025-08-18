@@ -94,26 +94,6 @@ The Streamlit interface provides multiple pages:
 - **Single Log Test**: Test individual log messages
 - **System Status**: Database health and performance monitoring
 
-### Programmatic Usage
-
-```python
-from processors.enhanced_processor import EnhancedLogProcessor
-
-# Initialize processor
-processor = EnhancedLogProcessor()
-
-# Classify single log
-result = processor.classify_log("Failed login attempt for user admin", "WebServer")
-print(f"Classification: {result['classification']}")
-print(f"Confidence: {result['confidence_score']}")
-print(f"Severity: {result['severity_score']}")
-
-# Batch processing
-logs = [("WebServer", "Memory usage exceeded 90%"), 
-        ("Database", "Query timeout error")]
-results = processor.process_batch(logs)
-```
-
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -133,20 +113,6 @@ JIRA_API_TOKEN=your_api_token
 # Optional: Slack Integration  
 SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_CHANNEL=#security-alerts
-```
-
-### Performance Tuning
-
-For high-volume processing, use the high-performance processor:
-
-```python
-from processors.high_performance_processor import HighPerformanceProcessor
-
-processor = HighPerformanceProcessor(
-    batch_size=1000,
-    enable_parallel=True,
-    confidence_threshold=0.8
-)
 ```
 
 ## 📈 Performance Benchmarks

@@ -79,13 +79,15 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Page",
-        ["Log Classification", "Analytics Dashboard", "Log History", "Single Log Test", "System Status"]
+        ["Log Classification", "Analytics Dashboard", "Grafana Dashboard", "Log History", "Single Log Test", "System Status"]
     )
     
     if page == "Log Classification":
         log_classification_page(db_available)
     elif page == "Analytics Dashboard":
         analytics_dashboard_page(db_available)
+    elif page == "Grafana Dashboard":
+        grafana_dashboard_page(db_available)
     elif page == "Log History":
         log_history_page(db_available)
     elif page == "Single Log Test":
@@ -153,12 +155,20 @@ def classify_and_display_results(df, store_in_db):
     # Check dataset size and recommend processing method
     total_logs = len(df)
     
-    # Always ask user if they want Slack notifications
-    enable_slack_notifications = st.checkbox(
-        "🔔 Enable Slack Notifications", 
-        value=True,
-        help="Send real-time alerts to Slack for critical events"
-    )
+    # Integration options
+    col1, col2 = st.columns(2)
+    with col1:
+        enable_slack_notifications = st.checkbox(
+            "🔔 Enable Slack Notifications", 
+            value=True,
+            help="Send real-time alerts to Slack for critical events"
+        )
+    with col2:
+        enable_jira_incidents = st.checkbox(
+            "🎫 Enable JIRA Incident Creation", 
+            value=True,
+            help="Automatically create JIRA tickets for high-severity security events"
+        )
     
     use_high_performance = total_logs > 100  # Lower threshold to include test.csv
     
@@ -181,7 +191,8 @@ def classify_and_display_results(df, store_in_db):
             max_workers=max_workers,
             batch_size=batch_size,
             use_database=store_in_db,
-            enable_slack=enable_slack_notifications
+            enable_slack=enable_slack_notifications,
+            enable_jira=enable_jira_incidents
         )
         
         try:
@@ -233,6 +244,21 @@ def classify_and_display_results(df, store_in_db):
                 st.warning(f"⚠️ Slack integration failed: {str(e)}")
                 slack_manager = None
         
+        # Import JIRA integration for standard processing
+        jira_manager = None
+        if enable_jira_incidents:
+            try:
+                from integrations.jira.jira_integration import get_jira_manager
+                jira_manager = get_jira_manager()
+                if jira_manager.is_available():
+                    st.success("🎫 JIRA incident creation enabled")
+                else:
+                    st.warning("⚠️ JIRA integration unavailable (check configuration)")
+                    jira_manager = None
+            except Exception as e:
+                st.warning(f"⚠️ JIRA integration failed: {str(e)}")
+                jira_manager = None
+        
         from processors.enhanced_processor import EnhancedLogProcessor
         processor = EnhancedLogProcessor()
         
@@ -241,6 +267,7 @@ def classify_and_display_results(df, store_in_db):
                 progress_bar = st.progress(0)
                 results = []
                 slack_alerts_sent = 0
+                jira_incidents_created = 0
                 
                 logs = list(zip(df['source'], df['log_message']))
                 total_logs = len(logs)
@@ -273,6 +300,33 @@ def classify_and_display_results(df, store_in_db):
                         except Exception as e:
                             print(f"Failed to send Slack alert: {e}")
                     
+                    # Create JIRA incident for critical security events
+                    if jira_manager and result.get('severity_score', 0) >= 8:
+                        try:
+                            import asyncio
+                            import threading
+                            
+                            def create_incident_bg():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    from integrations.jira.jira_integration import create_incident
+                                    incident = loop.run_until_complete(create_incident(result))
+                                    if incident:
+                                        return True
+                                finally:
+                                    loop.close()
+                                return False
+                            
+                            incident_thread = threading.Thread(target=create_incident_bg)
+                            incident_thread.daemon = True
+                            incident_thread.start()
+                            incident_thread.join()
+                            jira_incidents_created += 1
+                            
+                        except Exception as e:
+                            print(f"Failed to create JIRA incident: {e}")
+                    
                     progress_bar.progress((i + 1) / total_logs)
                     
                 end_time = time.time()
@@ -293,6 +347,14 @@ def classify_and_display_results(df, store_in_db):
                         
                         if severity_counts:
                             st.info(f"Severity distribution: {dict(severity_counts)}")
+                
+                # Show JIRA activity
+                if jira_manager:
+                    if jira_incidents_created > 0:
+                        st.success(f"🎫 Created {jira_incidents_created} JIRA incidents for critical events")
+                    else:
+                        if enable_jira_incidents:
+                            st.info("ℹ️ No JIRA incidents created (severity < 8)")
         except Exception as e:
             st.error(f"Standard processing failed: {str(e)}")
             return
@@ -454,6 +516,219 @@ def analytics_dashboard_page(db_available):
         st.error(f"Error loading dashboard: {str(e)}")
     finally:
         processor.close()
+
+def grafana_dashboard_page(db_available):
+    """Grafana dashboard integration page"""
+    st.header("📈 Grafana Analytics Dashboard")
+    
+    # Introduction
+    st.markdown("""
+    Welcome to the SOC Grafana Dashboard integration. This provides advanced analytics and visualizations
+    for your log data using Grafana's powerful charting capabilities.
+    """)
+    
+    # Status checks
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.subheader("🗄️ Database Status")
+        if db_available:
+            st.success("✅ Connected")
+            # Get log count
+            try:
+                from database.service import DatabaseService
+                db_service = DatabaseService()
+                log_count = db_service.get_log_count()
+                st.metric("Total Logs", log_count)
+            except Exception as e:
+                st.warning(f"Could not fetch log count: {e}")
+        else:
+            st.error("❌ Disconnected")
+    
+    with col2:
+        st.subheader("🚀 API Status")
+        try:
+            import requests
+            api_url = "http://localhost:8002"
+            response = requests.get(f"{api_url}/", timeout=5)
+            if response.status_code == 200:
+                st.success("✅ Running")
+                st.caption(f"API URL: {api_url}")
+            else:
+                st.error(f"❌ Error (Status: {response.status_code})")
+        except Exception as e:
+            st.error("❌ Not Running")
+            st.caption("Start with: python src/integrations/grafana/grafana_api.py")
+    
+    with col3:
+        st.subheader("📊 Grafana Status") 
+        try:
+            import requests
+            grafana_url = "http://localhost:3000"
+            response = requests.get(f"{grafana_url}/api/health", timeout=5)
+            if response.status_code == 200:
+                st.success("✅ Running")
+                st.caption(f"Grafana URL: {grafana_url}")
+            else:
+                st.error(f"❌ Error (Status: {response.status_code})")
+        except Exception as e:
+            st.error("❌ Not Running")
+            st.caption("Start with Docker or install Grafana")
+    
+    st.divider()
+    
+    # Quick start guide
+    with st.expander("🚀 Quick Start Guide", expanded=False):
+        st.markdown("""
+        ### Step 1: Start Required Services
+        
+        **Start SOC API Server:**
+        ```bash
+        cd src/integrations/grafana
+        python grafana_api.py
+        ```
+        
+        **Start Grafana (Docker):**
+        ```bash
+        docker-compose -f docker-compose-grafana.yml up -d
+        ```
+        
+        **Or start Grafana manually:**
+        ```bash
+        docker run -d -p 3000:3000 -e "GF_INSTALL_PLUGINS=grafana-simple-json-datasource" grafana/grafana
+        ```
+        
+        ### Step 2: Setup Grafana
+        ```bash
+        cd src/integrations/grafana
+        python grafana_setup.py
+        ```
+        
+        ### Step 3: Access Dashboard
+        - Open [Grafana](http://localhost:3000) (admin/socsystem)
+        - Navigate to SOC Dashboard
+        - Configure time range (last 7 days recommended)
+        """)
+    
+    # Action buttons
+    st.subheader("🎛️ Dashboard Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("🚀 Start API Server", help="Start the SOC API server for Grafana"):
+            with st.spinner("Starting API server..."):
+                try:
+                    import subprocess
+                    import os
+                    
+                    api_script = os.path.join("src", "integrations", "grafana", "grafana_api.py")
+                    if os.path.exists(api_script):
+                        # Start in background
+                        subprocess.Popen([
+                            "python", api_script
+                        ], cwd=os.getcwd())
+                        st.success("🚀 API server started in background")
+                        time.sleep(2)
+                        st.experimental_rerun()
+                    else:
+                        st.error("API script not found")
+                except Exception as e:
+                    st.error(f"Failed to start API server: {e}")
+    
+    with col2:
+        if st.button("📊 Open Grafana", help="Open Grafana in new tab"):
+            st.markdown('[🔗 Open Grafana Dashboard](http://localhost:3000)', unsafe_allow_html=True)
+            st.balloons()
+    
+    with col3:
+        if st.button("🔧 Setup Grafana", help="Run Grafana setup script"):
+            with st.spinner("Setting up Grafana..."):
+                try:
+                    import subprocess
+                    import os
+                    
+                    setup_script = os.path.join("src", "integrations", "grafana", "grafana_setup.py")
+                    if os.path.exists(setup_script):
+                        result = subprocess.run([
+                            "python", setup_script
+                        ], capture_output=True, text=True, cwd=os.getcwd())
+                        
+                        if result.returncode == 0:
+                            st.success("✅ Grafana setup completed!")
+                            st.code(result.stdout)
+                        else:
+                            st.error("❌ Setup failed")
+                            st.code(result.stderr)
+                    else:
+                        st.error("Setup script not found")
+                except Exception as e:
+                    st.error(f"Setup failed: {e}")
+    
+    with col4:
+        if st.button("📈 View Stats", help="Show API statistics"):
+            try:
+                import requests
+                response = requests.get("http://localhost:8002/stats/summary", timeout=5)
+                if response.status_code == 200:
+                    stats = response.json()
+                    st.json(stats)
+                else:
+                    st.error("Failed to get stats")
+            except Exception as e:
+                st.error(f"API not available: {e}")
+    
+    st.divider()
+    
+    # Embedded preview (if possible)
+    st.subheader("🖼️ Dashboard Preview")
+    
+    # Try to show recent logs from API
+    try:
+        import requests
+        response = requests.get("http://localhost:8002/logs/recent?limit=10", timeout=5)
+        if response.status_code == 200:
+            logs_data = response.json()
+            if logs_data:
+                st.success("✅ API is serving data to Grafana")
+                
+                # Show recent logs in a table
+                df = pd.DataFrame(logs_data)
+                st.dataframe(df, use_container_width=True)
+                
+                # Show quick stats
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    avg_severity = df['severity_score'].mean() if 'severity_score' in df else 0
+                    st.metric("Avg Severity", f"{avg_severity:.1f}")
+                with col2:
+                    critical_count = len(df[df['severity_score'] >= 8]) if 'severity_score' in df else 0
+                    st.metric("Critical Events", critical_count)
+                with col3:
+                    unique_sources = df['source'].nunique() if 'source' in df else 0
+                    st.metric("Unique Sources", unique_sources)
+            else:
+                st.info("No recent logs found. Process some logs first.")
+        else:
+            st.warning("API is not responding. Please start the API server.")
+    except Exception as e:
+        st.info("API not available. Start the API server to see live data.")
+    
+    # Instructions for embedding Grafana
+    with st.expander("🔗 Advanced: Embed Grafana Dashboard", expanded=False):
+        st.markdown("""
+        To embed Grafana dashboard directly in Streamlit:
+        
+        1. Enable anonymous access in Grafana
+        2. Get the dashboard embed URL
+        3. Use st.components.v1.iframe() to display
+        
+        **Example:**
+        ```python
+        import streamlit.components.v1 as components
+        components.iframe("http://localhost:3000/d-solo/dashboard-uid/dashboard-name", height=600)
+        ```
+        """)
 
 def log_history_page(db_available):
     """View historical log data from database"""
