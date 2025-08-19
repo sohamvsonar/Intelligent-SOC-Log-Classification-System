@@ -44,7 +44,7 @@ Log Input → Regex Filter → BERT Classification → LLM Fallback → Database
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/sohamvsonar/Intelligent-SOC-Log-Classification-System.git
    cd Log-Classification-System
    ```
 
@@ -123,41 +123,14 @@ SLACK_CHANNEL=#security-alerts
 - **Batch Processing**: 1000+ logs/minute
 - **Classification Accuracy**: >85% confidence average
 
-## 🔌 Integrations
+``
 
-### JIRA Integration
-Automatic incident creation for high-severity security alerts:
+## Screenshots
 
-```python
-from integrations.jira.jira_integration import JiraIntegration
-
-jira = JiraIntegration()
-jira.create_security_incident(log_data, severity_level=8)
-```
-
-### Slack Integration
-Real-time notifications for critical events:
-
-```python
-from integrations.slack.slack_integration import SlackIntegration
-
-slack = SlackIntegration()
-slack.send_alert(channel="#security", message="Critical security event detected")
-```
-
-## 🧪 Testing
-
-Run the benchmark tool to test performance:
-
-```bash
-python benchmark_performance.py
-```
-
-Test with sample data:
-
-```bash
-python test.py
-```
+ ![](https://github.com/sohamvsonar/Intelligent-SOC-Log-Classification-System/blob/main/assets/platform_2.jpg) 
+ ![](https://github.com/sohamvsonar/Intelligent-SOC-Log-Classification-System/blob/main/assets/Slack.jpg) 
+ ![](https://github.com/sohamvsonar/Intelligent-SOC-Log-Classification-System/blob/main/assets/JIRA.jpg) 
+ ![](https://github.com/sohamvsonar/Intelligent-SOC-Log-Classification-System/blob/main/assets/grafana.jpg)
 
 ## 📁 Project Structure
 
@@ -198,10 +171,6 @@ Log-Classification-System/
 4. Add tests for new functionality
 5. Submit a pull request
 
-## 📄 License
-
-This project is part of academic research at IIT. Please contact the maintainers for usage permissions.
-
 ## 🆘 Support
 
 For issues and questions:
@@ -209,23 +178,3 @@ For issues and questions:
 1. Check the [troubleshooting guide](PHASE1_SETUP.md#-troubleshooting)
 2. Review existing documentation in `/docs`
 3. Create an issue with detailed error information
-
-## 🔄 Roadmap
-
-### Phase 2 (In Progress)
-- Real-time log streaming with Kafka
-- REST API endpoints
-- Advanced threat severity scoring
-- Model versioning and A/B testing
-
-### Phase 3 (Planned)
-- Machine learning model improvements
-- Cross-system correlation analysis
-- Automated remediation workflows
-- Enterprise scalability enhancements
-
----
-
-**Status**: Phase 1 Complete ✅ | Phase 2 In Development 🚧
-
-Built with ❤️ for intelligent log analysis and automated SOC operations.
